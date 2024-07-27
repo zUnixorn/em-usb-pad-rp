@@ -5,15 +5,11 @@ use defmt::{info, warn, trace, debug};
 
 use embassy_executor::Spawner;
 use embassy_futures::join::{join3, join4};
-// use embassy_stm32::exti::ExtiInput;
-// use embassy_stm32::gpio::{Input, Level, Output, OutputOpenDrain, Pull, Speed};
-// use embassy_stm32::time::Hertz;
-// use embassy_stm32::{interrupt, Config, bind_interrupts, peripherals};
 use embassy_time::{Duration, Timer};
 use embassy_usb::control::OutResponse;
 use embassy_usb::Builder;
 // use embassy_stm32::usb_otg;
-use {defmt_rtt as _};//, panic_probe as _};
+use {defmt_rtt as _};
 
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::Channel;
@@ -36,8 +32,6 @@ use embassy_rp::config::Config;
 use embassy_rp::gpio::{Input, Pull};
 use embassy_rp::peripherals::USB;
 use embassy_rp::usb::{Driver, InterruptHandler};
-// use embassy_stm32::peripherals::{PA1, PA2, PA3, PA4, PA5, PA6, PA7};
-// use embassy_stm32::usb_otg::Driver;
 
 const VENDOR_STRING: &'static str = "TEST";
 const PRODUCT_STRING: &'static str = "TEST CON";
@@ -49,6 +43,7 @@ bind_interrupts!(struct Irqs {
 
 #[embassy_executor::main]
 async fn main(_spawner: Spawner) {
+    // Old code from stm32f411
     // let mut config = Config::default();
     //
     // {
@@ -92,10 +87,8 @@ async fn main(_spawner: Spawner) {
 
     // config.vbus_detection = false;
 
-    // Create the driver, from the HAL.
     let driver = Driver::new(p.USB, Irqs);
 
-    // Create embassy-usb Config
     let mut config = embassy_usb::Config::new(0x045e, 0x028e);
     config.max_power = 500;
     config.max_packet_size_0 = 8;
@@ -109,8 +102,6 @@ async fn main(_spawner: Spawner) {
     config.serial_number = Some(SERIAL_NUMBER);
     config.self_powered = true;
 
-    // Create embassy-usb DeviceBuilder using the driver and config.
-    // It needs some buffers for building the descriptors.
     let mut device_descriptor = [0; 256];
     let mut config_descriptor = [0; 256];
     let mut bos_descriptor = [0; 256];
@@ -119,7 +110,6 @@ async fn main(_spawner: Spawner) {
 
     let mut state = XinputState::new();
 
-    // Note: We actually don't need BOS descriptor. It's easy to change. But I'll keep it.
     let mut builder = Builder::new(
         driver,
         config,
@@ -129,7 +119,6 @@ async fn main(_spawner: Spawner) {
         &mut control_buf,
     );
 
-    // Create classes on the builder.
     let config = crate::xinput::Config {
         vendor_string: Some(VENDOR_STRING),
         product_string: Some(PRODUCT_STRING),
@@ -139,27 +128,18 @@ async fn main(_spawner: Spawner) {
     };
     let xinput = XinputReaderWriter::<_>::new(&mut builder, &mut state, config);
 
-    // Build the builder.
     let mut usb = builder.build();
 
-    // Run the USB device. Well, here's only the future to run.
     let usb_fut = usb.run();
-
-    // previously I use a single button to test
-    // this might be developed to a button for special functions
-    // I need abstraction.
-    // let mut button = ExtiInput::new(Input::new(p.PA0, Pull::Up), p.EXTI0);
 
     let mut button = Input::new(p.PIN_24, Pull::Up);
 
     let (reader, mut writer) = xinput.split();
 
-    // communication between tasks
     let channel = Channel::<NoopRawMutex, (bool, (usize, usize)), 24>::new();
     let sender = channel.sender();
     let receiver = channel.receiver();
 
-    // scan keys and generate key events
     let keypad_fut = async {
         info!("Now waiting for button");
 
@@ -176,7 +156,6 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    // Process key events
     let in_fut = async {
         let mut controller = XinputControlReport::default();
 
@@ -213,16 +192,11 @@ async fn main(_spawner: Spawner) {
         }
     };
 
-    // read report from USB host
-    // basically rumble and led status
     let out_fut = async {
         reader.run(false, &request_handler).await;
     };
 
-    // Run everything concurrently.
-    // If we had made everything `'static` above instead, we could do this using separate tasks instead.
     join4(usb_fut, in_fut, out_fut, keypad_fut).await;
-    // join3(usb_fut, in_fut, out_fut).await;
 }
 
 struct MyRequestHandler {}
