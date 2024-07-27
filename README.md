@@ -1,0 +1,1 @@
+xinput usb driver copied from https://github.com/hyx0329/em-usb-pad
